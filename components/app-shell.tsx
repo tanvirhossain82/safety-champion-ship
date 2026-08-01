@@ -25,7 +25,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/departments', label: 'Departments', icon: Building2 },
-  { href: '/employees', label: 'Employees', icon: Users, permission: 'canManageEmployees' },
+  { href: '/admin', label: 'Admin', icon: Shield, permission: 'canManageEmployees' },
   { href: '/evaluation', label: 'Evaluation', icon: ClipboardCheck },
   { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
   { href: '/reports', label: 'Reports', icon: FileBarChart, permission: 'canViewReports' },

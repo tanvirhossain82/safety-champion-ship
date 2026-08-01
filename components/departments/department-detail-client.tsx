@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Users, ClipboardCheck, Loader2, Trophy, TrendingUp, Award,
   Building2, Boxes, Warehouse, FlaskConical, Droplets, Wrench, Cpu,
-  Plus, Pencil, Trash2, Search,
+  Pencil, Trash2, Search,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { fetchRankedEvaluations, RankedRow, logAudit } from '@/lib/data';
@@ -100,12 +100,6 @@ export function DepartmentDetailClient({ code }: { code: string }) {
   }, [code, month, year]);
 
   useEffect(() => { load(); }, [load]);
-
-  const openAddEmp = () => {
-    setEditingEmp(null);
-    setEmpForm(emptyEmpForm);
-    setEmpDialogOpen(true);
-  };
 
   const openEditEmp = (emp: Employee) => {
     setEditingEmp(emp);
@@ -305,9 +299,6 @@ export function DepartmentDetailClient({ code }: { code: string }) {
               <CardTitle className="flex items-center gap-2 text-lg"><Users className="h-5 w-5 text-primary" /> Employees in {department.name}</CardTitle>
               <CardDescription>{activeEmployees.length} active, {employees.length - activeEmployees.length} inactive</CardDescription>
             </div>
-            {isAdmin && (
-              <Button size="sm" onClick={openAddEmp}><Plus className="mr-2 h-4 w-4" /> Add Employee</Button>
-            )}
           </div>
         </CardHeader>
         <CardContent>
@@ -321,10 +312,7 @@ export function DepartmentDetailClient({ code }: { code: string }) {
           {filteredEmployees.length === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center text-center">
               <Users className="mb-2 h-8 w-8 text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">{employees.length === 0 ? 'No employees in this department yet' : 'No employees match your search'}</p>
-              {isAdmin && employees.length === 0 && (
-                <Button size="sm" variant="outline" className="mt-3" onClick={openAddEmp}><Plus className="mr-2 h-4 w-4" /> Add the first employee</Button>
-              )}
+              <p className="text-sm text-muted-foreground">{employees.length === 0 ? 'No employees in this department yet. Employees are managed from the Admin panel.' : 'No employees match your search'}</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
