@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light theme - White / Blue / Safety Orange */
+    --background: 0 0% 100%;
+    --foreground: 222 47% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 28 100% 52%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+    --chart-1: 217 91% 60%;
+    --chart-2: 28 100% 52%;
+    --chart-3: 160 60% 45%;
+    --chart-4: 142 71% 45%;
+    --chart-5: 38 92% 50%;
+    --radius: 0.75rem;
+    --gold: 43 96% 56%;
+    --silver: 0 0% 75%;
+    --bronze: 28 71% 52%;
+  }
+
+  .dark {
+    --background: 222 47% 7%;
+    --foreground: 210 40% 98%;
+    --card: 222 42% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 42% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 28 100% 52%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 217 33% 20%;
+    --input: 217 33% 20%;
+    --ring: 217 91% 60%;
+    --chart-1: 217 91% 60%;
+    --chart-2: 28 100% 52%;
+    --chart-3: 160 60% 45%;
+    --chart-4: 142 71% 45%;
+    --chart-5: 38 92% 50%;
+    --gold: 43 96% 56%;
+    --silver: 0 0% 75%;
+    --bronze: 28 71% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer utilities {
+  .bg-gold {
+    background: linear-gradient(135deg, hsl(var(--gold)), hsl(35 92% 40%));
+  }
+  .bg-silver {
+    background: linear-gradient(135deg, hsl(var(--silver)), hsl(210 14% 60%));
+  }
+  .bg-bronze {
+    background: linear-gradient(135deg, hsl(var(--bronze)), hsl(20 70% 35%));
+  }
+  .text-gold {
+    color: hsl(var(--gold));
+  }
+  .text-silver {
+    color: hsl(var(--silver));
+  }
+  .text-bronze {
+    color: hsl(var(--bronze));
+  }
+  .border-gold {
+    border-color: hsl(var(--gold));
+  }
+  .border-silver {
+    border-color: hsl(var(--silver));
+  }
+  .border-bronze {
+    border-color: hsl(var(--bronze));
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 9999px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--gold) / 0.4); }
+  50% { box-shadow: 0 0 0 12px hsl(var(--gold) / 0); }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.4s ease-out both;
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.4s ease-out both;
+}
+.animate-scale-in {
+  animation: scale-in 0.3s ease-out both;
+}
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+.animate-fade-in-delay-1 {
+  animation: fade-in 0.4s ease-out 0.1s both;
+}
+.animate-fade-in-delay-2 {
+  animation: fade-in 0.4s ease-out 0.2s both;
+}
+.animate-fade-in-delay-3 {
+  animation: fade-in 0.4s ease-out 0.3s both;
+}
