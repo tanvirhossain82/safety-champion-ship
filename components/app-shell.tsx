@@ -6,6 +6,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard, Users, ClipboardCheck, Trophy, FileBarChart,
   ShieldAlert, Shield, ScrollText, LogOut, Menu, X, ChevronRight, Building2,
+  Search,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth-context';
 import { UserRole, ROLE_LABELS, ROLE_PERMISSIONS } from '@/lib/types';
@@ -20,15 +21,17 @@ interface NavItem {
   label: string;
   icon: React.ElementType;
   permission?: keyof typeof ROLE_PERMISSIONS[UserRole];
+  group?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/departments', label: 'Departments', icon: Building2 },
   { href: '/employees', label: 'Employees', icon: Users, permission: 'canManageEmployees' },
-  { href: '/evaluation', label: 'Evaluation', icon: ClipboardCheck },
-  { href: '/leaderboard', label: 'Leaderboard', icon: Trophy },
-  { href: '/reports', label: 'Reports', icon: FileBarChart, permission: 'canViewReports' },
+  { href: '/evaluation', label: 'Evaluation', icon: ClipboardCheck, group: 'Admin' },
+  { href: '/leaderboard', label: 'Leaderboard', icon: Trophy, group: 'Admin' },
+  { href: '/reports', label: 'Reports', icon: FileBarChart, permission: 'canViewReports', group: 'Admin' },
+  { href: '/search', label: 'Search & Filters', icon: Search, permission: 'canViewReports', group: 'Admin' },
   { href: '/negative-reasons', label: 'Negative Reasons', icon: ShieldAlert, permission: 'canManageNegativeReasons' },
   { href: '/audit-log', label: 'Audit Log', icon: ScrollText, permission: 'canViewAuditLog' },
 ];
@@ -160,25 +163,32 @@ function SidebarContent({
       </div>
 
       <nav className="flex-1 space-y-1 overflow-y-auto p-3 scrollbar-thin">
-        {items.map((item) => {
+        {items.map((item, idx) => {
           const active = pathname === item.href || pathname.startsWith(item.href + '/');
           const Icon = item.icon;
+          const showGroupHeader = !!item.group && items[idx - 1]?.group !== item.group;
           return (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={onClose}
-              className={cn(
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                active
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            <div key={item.href}>
+              {showGroupHeader && (
+                <div className="px-3 pb-1 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70 first:pt-0">
+                  {item.group}
+                </div>
               )}
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              <span className="flex-1">{item.label}</span>
-              {active && <ChevronRight className="h-4 w-4" />}
-            </Link>
+              <Link
+                href={item.href}
+                onClick={onClose}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+                  active
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="flex-1">{item.label}</span>
+                {active && <ChevronRight className="h-4 w-4" />}
+              </Link>
+            </div>
           );
         })}
       </nav>
