@@ -37,11 +37,9 @@ export default function AuthPage() {
     e.preventDefault();
     setError(null);
     setBusy(true);
-    const { error, needsConfirmation } = await signUp(email, password, fullName);
+    const { error } = await signUp(email, password, fullName);
     setBusy(false);
     if (error) setError(error);
-    else if (needsConfirmation)
-      setError('Account created! Please confirm your email, or ask the administrator to activate your account before signing in.');
     else setError('Account created! You are now signed in.');
   };
 

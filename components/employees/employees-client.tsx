@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Users, Plus, Search, Pencil, Trash2, Loader2, Upload, X, UserCheck,
-  FileSpreadsheet, Download, CheckCircle2, AlertCircle,
+  FileSpreadsheet, Download, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
 import { supabase, STORAGE_BUCKET } from '@/lib/supabase/client';
 import { logAudit } from '@/lib/data';
@@ -51,41 +51,37 @@ const emptyForm: FormState = {
   photo: null,
 };
 
-interface ImportResult {
-  inserted: number;
-  skipped: number;
-  errors: string[];
-  byDept: Record<string, number>;
+interface ImportRow {
+  rowNum: number;
+  employee_id: string;
+  name: string;
+  department: string;
+  designation: string;
+  joining_date: string;
+  status: 'Active' | 'Inactive';
+  valid: boolean;
+  error?: string;
 }
 
-// Normalize a raw department string from Excel to a valid Department code
-function normalizeDepartment(raw: unknown): Department | null {
-  if (raw == null) return null;
-  const val = String(raw).trim().toLowerCase();
-  const match = DEPARTMENTS.find((d) => d.toLowerCase() === val);
-  return match ?? null;
-}
+const normalizeHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-// Convert an Excel cell (Date, serial number, or string) to yyyy-MM-dd
-function parseExcelDate(raw: unknown): string {
-  if (raw instanceof Date && !isNaN(raw.getTime())) return format(raw, 'yyyy-MM-dd');
-  if (typeof raw === 'string' && raw.trim()) {
-    const d = new Date(raw.trim());
-    if (!isNaN(d.getTime())) return format(d, 'yyyy-MM-dd');
-  }
-  return format(new Date(), 'yyyy-MM-dd');
-}
-
-// Read a value from a row by trying several possible header names (case-insensitive)
-function pick(row: Record<string, unknown>, keys: string[]): unknown {
-  const lowerMap: Record<string, unknown> = {};
-  Object.keys(row).forEach((k) => { lowerMap[k.trim().toLowerCase()] = row[k]; });
-  for (const key of keys) {
-    const v = lowerMap[key.toLowerCase()];
-    if (v != null && String(v).trim() !== '') return v;
-  }
-  return undefined;
-}
+const IMPORT_HEADER_MAP: Record<string, keyof Omit<ImportRow, 'rowNum' | 'valid' | 'error'>> = {
+  employeeid: 'employee_id',
+  empid: 'employee_id',
+  id: 'employee_id',
+  employeecode: 'employee_id',
+  name: 'name',
+  employeename: 'name',
+  fullname: 'name',
+  department: 'department',
+  dept: 'department',
+  designation: 'designation',
+  role: 'designation',
+  joiningdate: 'joining_date',
+  joindate: 'joining_date',
+  dateofjoining: 'joining_date',
+  status: 'status',
+};
 
 export function EmployeesClient() {
   const { profile } = useAuth();
@@ -106,10 +102,11 @@ export function EmployeesClient() {
   const [deleteTarget, setDeleteTarget] = useState<Employee | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Excel bulk import
   const [importOpen, setImportOpen] = useState(false);
+  const [importFileName, setImportFileName] = useState('');
+  const [importRows, setImportRows] = useState<ImportRow[]>([]);
+  const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   const loadEmployees = useCallback(async () => {
     setLoading(true);
@@ -223,88 +220,118 @@ export function EmployeesClient() {
     }
   };
 
-  const downloadTemplate = async () => {
-    const XLSX = await import('xlsx');
-    const sample = [
-      { 'Employee ID': 'EMP-001', Name: 'John Doe', Department: 'MRP', Designation: 'Operator', 'Joining Date': '2024-01-15', Status: 'Active' },
-      { 'Employee ID': 'EMP-002', Name: 'Jane Smith', Department: 'Warehouse', Designation: 'Supervisor', 'Joining Date': '2023-06-01', Status: 'Active' },
-    ];
-    const ws = XLSX.utils.json_to_sheet(sample);
-    ws['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 14 }, { wch: 18 }, { wch: 14 }, { wch: 10 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Employees');
-    XLSX.writeFile(wb, 'employee-import-template.xlsx');
+  const openImport = () => {
+    setImportRows([]);
+    setImportFileName('');
+    setImportOpen(true);
   };
 
-  const handleExcelImport = async (file: File) => {
-    setImporting(true);
-    setImportResult(null);
+  const parseImportFile = async (file: File) => {
+    setParsing(true);
+    setImportFileName(file.name);
+    setImportRows([]);
     try {
       const XLSX = await import('xlsx');
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: '' });
+      const buffer = await file.arrayBuffer();
+      const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: '', raw: true });
 
-      const result: ImportResult = { inserted: 0, skipped: 0, errors: [], byDept: {} };
-      const payloads: any[] = [];
       const seenIds = new Set<string>();
+      const existingIds = new Set(employees.map((e) => e.employee_id.toLowerCase()));
 
-      rows.forEach((row, i) => {
-        const line = i + 2; // account for header row
-        const empId = String(pick(row, ['Employee ID', 'employee_id', 'emp id', 'id', 'code']) ?? '').trim();
-        const name = String(pick(row, ['Name', 'full name', 'employee name']) ?? '').trim();
-        const dept = normalizeDepartment(pick(row, ['Department', 'dept']));
-        const designation = String(pick(row, ['Designation', 'title', 'position']) ?? '').trim();
-        const joining = parseExcelDate(pick(row, ['Joining Date', 'joining_date', 'join date', 'doj']));
-        const statusRaw = String(pick(row, ['Status']) ?? 'Active').trim().toLowerCase();
-        const status: 'Active' | 'Inactive' = statusRaw === 'inactive' ? 'Inactive' : 'Active';
-
-        if (!empId || !name || !dept) {
-          result.skipped++;
-          result.errors.push(`Row ${line}: missing ${!empId ? 'Employee ID' : !name ? 'Name' : 'valid Department'}`);
-          return;
-        }
-        if (seenIds.has(empId)) {
-          result.skipped++;
-          result.errors.push(`Row ${line}: duplicate Employee ID "${empId}" in file`);
-          return;
-        }
-        seenIds.add(empId);
-        payloads.push({
-          employee_id: empId,
-          name,
-          department: dept,
-          designation: designation || null,
-          joining_date: joining,
-          status,
-          photo: null,
+      const rows: ImportRow[] = json.map((raw, idx) => {
+        const normalized: Partial<Record<keyof Omit<ImportRow, 'rowNum' | 'valid' | 'error'>, string>> = {};
+        Object.entries(raw).forEach(([key, val]) => {
+          const mapped = IMPORT_HEADER_MAP[normalizeHeader(key)];
+          if (!mapped) return;
+          if (mapped === 'joining_date' && val instanceof Date) {
+            normalized[mapped] = format(val, 'yyyy-MM-dd');
+          } else {
+            normalized[mapped] = String(val ?? '').trim();
+          }
         });
-        result.byDept[dept] = (result.byDept[dept] ?? 0) + 1;
+
+        const employee_id = normalized.employee_id || '';
+        const name = normalized.name || '';
+        const deptRaw = normalized.department || '';
+        const designation = normalized.designation || '';
+        const statusRaw = (normalized.status || 'Active').trim();
+        const status: 'Active' | 'Inactive' = statusRaw.toLowerCase() === 'inactive' ? 'Inactive' : 'Active';
+
+        let joining_date = normalized.joining_date || '';
+        if (!joining_date || isNaN(Date.parse(joining_date))) {
+          joining_date = format(new Date(), 'yyyy-MM-dd');
+        } else {
+          joining_date = format(new Date(joining_date), 'yyyy-MM-dd');
+        }
+
+        const deptMatch = DEPARTMENTS.find((d) => d.toLowerCase() === deptRaw.toLowerCase());
+
+        let error: string | undefined;
+        if (!employee_id) error = 'Missing Employee ID';
+        else if (!name) error = 'Missing Name';
+        else if (!deptMatch) error = deptRaw ? `Unknown department "${deptRaw}"` : 'Missing Department';
+        else if (existingIds.has(employee_id.toLowerCase())) error = 'Employee ID already exists';
+        else if (seenIds.has(employee_id.toLowerCase())) error = 'Duplicate row in file';
+
+        if (!error) seenIds.add(employee_id.toLowerCase());
+
+        return {
+          rowNum: idx + 2,
+          employee_id,
+          name,
+          department: deptMatch ?? deptRaw,
+          designation,
+          joining_date,
+          status,
+          valid: !error,
+          error,
+        };
       });
 
-      if (payloads.length > 0) {
-        // Upsert so re-importing updates existing employees instead of failing on unique employee_id
-        const { data, error } = await supabase
-          .from('employees')
-          .upsert(payloads, { onConflict: 'employee_id' })
-          .select('id');
-        if (error) throw error;
-        result.inserted = data?.length ?? payloads.length;
-        await logAudit(
-          'IMPORT', 'employee', null,
-          `Imported ${result.inserted} employees from Excel (${Object.entries(result.byDept).map(([d, n]) => `${d}: ${n}`).join(', ')})`,
-          profile?.email,
-        );
+      setImportRows(rows);
+      if (rows.length === 0) {
+        toast({ title: 'No rows found', description: 'The file appears to be empty.', variant: 'destructive' });
       }
+    } catch (e: any) {
+      toast({ title: 'Could not read file', description: e.message, variant: 'destructive' });
+      setImportRows([]);
+    } finally {
+      setParsing(false);
+    }
+  };
 
-      setImportResult(result);
-      if (result.inserted > 0) {
-        toast({ title: `Imported ${result.inserted} employees`, description: result.skipped ? `${result.skipped} rows skipped` : 'All rows imported successfully' });
-        loadEmployees();
-      } else {
-        toast({ title: 'No employees imported', description: 'Check the file format and required columns', variant: 'destructive' });
-      }
+  const importByDept = useMemo(() => {
+    const counts: Record<string, number> = {};
+    importRows.filter((r) => r.valid).forEach((r) => { counts[r.department] = (counts[r.department] ?? 0) + 1; });
+    return counts;
+  }, [importRows]);
+
+  const handleImportConfirm = async () => {
+    const valid = importRows.filter((r) => r.valid);
+    if (valid.length === 0) return;
+    setImporting(true);
+    try {
+      const payload = valid.map((r) => ({
+        employee_id: r.employee_id,
+        name: r.name,
+        department: r.department as Department,
+        designation: r.designation || null,
+        joining_date: r.joining_date,
+        status: r.status,
+      }));
+      const { error } = await supabase.from('employees').insert(payload);
+      if (error) throw error;
+
+      const summary = Object.entries(importByDept).map(([d, c]) => `${d}: ${c}`).join(', ');
+      await logAudit('IMPORT', 'employee', null, `Bulk imported ${valid.length} employees from Excel (${summary})`, profile?.email);
+      toast({ title: `${valid.length} employee${valid.length === 1 ? '' : 's'} imported`, description: summary });
+
+      setImportOpen(false);
+      setImportRows([]);
+      setImportFileName('');
+      loadEmployees();
     } catch (e: any) {
       toast({ title: 'Import failed', description: e.message, variant: 'destructive' });
     } finally {
@@ -312,15 +339,31 @@ export function EmployeesClient() {
     }
   };
 
+  const downloadTemplate = async () => {
+    const XLSX = await import('xlsx');
+    const sample = DEPARTMENTS.map((d, i) => ({
+      'Employee ID': `${d.slice(0, 3).toUpperCase()}-${1001 + i}`,
+      'Name': '',
+      'Department': d,
+      'Designation': '',
+      'Joining Date': format(new Date(), 'yyyy-MM-dd'),
+      'Status': 'Active',
+    }));
+    const ws = XLSX.utils.json_to_sheet(sample);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Employees');
+    XLSX.writeFile(wb, 'employee-import-template.xlsx');
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight">Employee Management</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Add, edit and import employee records across all departments</p>
+          <h1 className="text-2xl font-bold tracking-tight">Employees</h1>
+          <p className="text-sm text-muted-foreground">Manage employee records across all departments</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => { setImportResult(null); setImportOpen(true); }}>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={openImport}>
             <FileSpreadsheet className="mr-2 h-4 w-4" /> Import Excel
           </Button>
           <Button onClick={openAdd}>
@@ -525,96 +568,99 @@ export function EmployeesClient() {
         </DialogContent>
       </Dialog>
 
-      {/* Excel import dialog */}
-      <Dialog open={importOpen} onOpenChange={(open) => { if (!importing) setImportOpen(open); }}>
-        <DialogContent className="max-w-lg">
+      {/* Import from Excel dialog */}
+      <Dialog open={importOpen} onOpenChange={(open) => { setImportOpen(open); if (!open) { setImportRows([]); setImportFileName(''); } }}>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5 text-primary" /> Import Employees from Excel
-            </DialogTitle>
+            <DialogTitle>Import Employees from Excel</DialogTitle>
             <DialogDescription>
-              Upload an .xlsx/.csv file. Employees are added to their department automatically.
+              Upload a spreadsheet with columns: Employee ID, Name, Department, Designation, Joining Date, Status. Rows are validated and assigned to their department automatically.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="rounded-lg border bg-muted/40 p-3 text-sm">
-              <p className="font-medium">Required columns</p>
-              <p className="mt-1 text-muted-foreground">
-                <span className="font-medium text-foreground">Employee ID</span>, <span className="font-medium text-foreground">Name</span>, <span className="font-medium text-foreground">Department</span> (MRP, Warehouse, Emulsion, Solvent, Maintenance, Technical). Optional: Designation, Joining Date, Status.
-              </p>
-              <Button type="button" variant="link" className="mt-1 h-auto p-0 text-xs" onClick={downloadTemplate}>
-                <Download className="mr-1 h-3 w-3" /> Download template
+            <div className="flex flex-wrap items-center gap-2">
+              <label htmlFor="import-file">
+                <Button type="button" variant="outline" size="sm" asChild disabled={parsing}>
+                  <span>{parsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Upload className="mr-1 h-4 w-4" /> Choose File</>}</span>
+                </Button>
+              </label>
+              <Input
+                id="import-file"
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) parseImportFile(f); }}
+              />
+              {importFileName && <span className="text-sm text-muted-foreground">{importFileName}</span>}
+              <Button type="button" variant="ghost" size="sm" onClick={downloadTemplate} className="ml-auto">
+                <Download className="mr-1 h-4 w-4" /> Download template
               </Button>
             </div>
 
-            {!importResult ? (
-              <label
-                htmlFor="excel-file"
-                className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border p-8 text-center transition-colors hover:border-primary/50 hover:bg-muted/40"
-              >
-                {importing ? (
-                  <>
-                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-                    <span className="text-sm text-muted-foreground">Importing, please wait...</span>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-8 w-8 text-muted-foreground" />
-                    <span className="text-sm font-medium">Click to choose an Excel file</span>
-                    <span className="text-xs text-muted-foreground">.xlsx, .xls or .csv</span>
-                  </>
-                )}
-                <Input
-                  id="excel-file"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  className="hidden"
-                  disabled={importing}
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleExcelImport(f); e.target.value = ''; }}
-                />
-              </label>
-            ) : (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 rounded-lg border border-green-500/20 bg-green-500/10 p-3">
-                  <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" />
-                  <div className="text-sm">
-                    <span className="font-semibold">{importResult.inserted}</span> employees imported
-                    {importResult.skipped > 0 && <span className="text-muted-foreground"> · {importResult.skipped} skipped</span>}
-                  </div>
+            {importRows.length > 0 && (
+              <>
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <Badge variant="secondary" className="gap-1">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                    {importRows.filter((r) => r.valid).length} ready to import
+                  </Badge>
+                  {importRows.some((r) => !r.valid) && (
+                    <Badge variant="outline" className="gap-1 border-destructive/30 text-destructive">
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      {importRows.filter((r) => !r.valid).length} skipped
+                    </Badge>
+                  )}
+                  {Object.entries(importByDept).map(([d, c]) => (
+                    <Badge key={d} variant="outline" className="text-xs">{d}: {c}</Badge>
+                  ))}
                 </div>
 
-                {Object.keys(importResult.byDept).length > 0 && (
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(importResult.byDept).map(([d, n]) => (
-                      <Badge key={d} variant="secondary">{d}: {n}</Badge>
-                    ))}
-                  </div>
-                )}
-
-                {importResult.errors.length > 0 && (
-                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
-                    <div className="mb-1 flex items-center gap-2 text-sm font-medium text-amber-700">
-                      <AlertCircle className="h-4 w-4" /> {importResult.errors.length} rows skipped
-                    </div>
-                    <ul className="max-h-32 space-y-0.5 overflow-y-auto text-xs text-muted-foreground">
-                      {importResult.errors.slice(0, 30).map((err, i) => <li key={i}>{err}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </div>
+                <div className="max-h-72 overflow-auto rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-12">Row</TableHead>
+                        <TableHead>Emp ID</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Department</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Note</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {importRows.map((r) => (
+                        <TableRow key={r.rowNum} className={!r.valid ? 'bg-destructive/5' : ''}>
+                          <TableCell className="text-xs text-muted-foreground">{r.rowNum}</TableCell>
+                          <TableCell className="text-xs">{r.employee_id || '—'}</TableCell>
+                          <TableCell className="text-sm">{r.name || '—'}</TableCell>
+                          <TableCell className="text-sm">{r.department || '—'}</TableCell>
+                          <TableCell className="text-xs">{r.status}</TableCell>
+                          <TableCell className="text-xs">
+                            {r.valid
+                              ? <span className="flex items-center gap-1 text-green-600"><CheckCircle2 className="h-3.5 w-3.5" /> OK</span>
+                              : <span className="flex items-center gap-1 text-destructive"><AlertTriangle className="h-3.5 w-3.5" /> {r.error}</span>}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
           </div>
 
           <DialogFooter>
-            {importResult ? (
-              <>
-                <Button variant="outline" onClick={() => setImportResult(null)}>Import Another</Button>
-                <Button onClick={() => setImportOpen(false)}>Done</Button>
-              </>
-            ) : (
-              <Button variant="outline" onClick={() => setImportOpen(false)} disabled={importing}>Cancel</Button>
-            )}
+            <Button type="button" variant="outline" onClick={() => setImportOpen(false)}>Cancel</Button>
+            <Button
+              type="button"
+              onClick={handleImportConfirm}
+              disabled={importing || importRows.filter((r) => r.valid).length === 0}
+            >
+              {importing
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : `Import ${importRows.filter((r) => r.valid).length || ''} Employee${importRows.filter((r) => r.valid).length === 1 ? '' : 's'}`}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
