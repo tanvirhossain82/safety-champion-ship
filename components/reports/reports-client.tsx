@@ -2,7 +2,7 @@
 
 import {
   FileBarChart, Loader2, FileText, FileSpreadsheet, Printer, Trophy,
-  TrendingUp, TrendingDown, Users, BarChart3, FileDown,
+  TrendingUp, TrendingDown, Users, BarChart3,
 } from 'lucide-react';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase/client';
@@ -132,32 +132,6 @@ export function ReportsClient() {
     }
   };
 
-  const exportCSV = (data: any[], columns: { header: string; key: string }[]) => {
-    try {
-      const escapeCell = (val: any) => {
-        const s = val !== undefined && val !== null ? String(val) : '';
-        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-      };
-      const headerRow = columns.map((c) => escapeCell(c.header)).join(',');
-      const bodyRows = data.map((row) =>
-        columns.map((c) => escapeCell(c.key.split('.').reduce((o, k) => o?.[k], row))).join(',')
-      );
-      const csvContent = [headerRow, ...bodyRows].join('\r\n');
-      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `safety-${tab}-${year}-${month}.csv`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      toast({ title: 'CSV exported' });
-    } catch (e: any) {
-      toast({ title: 'CSV export failed', description: e.message, variant: 'destructive' });
-    }
-  };
-
   const printReport = () => {
     window.print();
   };
@@ -228,15 +202,6 @@ export function ReportsClient() {
           )}
         >
           <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Excel
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => exportCSV(
-            tab === 'monthly' ? ranked : tab === 'department' ? deptRanking.map((d, i) => ({ ...d, _rank: i + 1 })) : tab === 'top10' ? top10 : tab === 'lowest' ? lowest : [],
-            tab === 'department' ? deptCols : monthlyCols
-          )}
-        >
-          <FileDown className="mr-2 h-4 w-4" /> Export CSV
         </Button>
         <Button variant="outline" onClick={printReport}>
           <Printer className="mr-2 h-4 w-4" /> Print
