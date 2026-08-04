@@ -30,7 +30,14 @@ export default function AuthPage() {
     setBusy(true);
     const { error } = await signIn(email, password);
     setBusy(false);
-    if (error) setError(error);
+    if (error) {
+      setPassword('');
+      if (error.toLowerCase().includes('invalid login credentials')) {
+        setError('Incorrect email or password. Please try again.');
+      } else {
+        setError(error);
+      }
+    }
   };
 
   const handleSignUp = async (e: React.FormEvent) => {
