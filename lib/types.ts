@@ -37,6 +37,11 @@ export interface Employee {
   created_at: string;
 }
 
+export interface HrCriteriaBreakdown {
+  positive: Record<string, number>;
+  negative: Record<string, number>;
+}
+
 export interface Evaluation {
   id: string;
   employee_id: string;
@@ -46,6 +51,7 @@ export interface Evaluation {
   hr_marks: number;
   safety_marks: number;
   negative_marks: number;
+  hr_criteria?: HrCriteriaBreakdown | null;
   remarks: string | null;
   total_marks: number;
   created_by: string | null;
