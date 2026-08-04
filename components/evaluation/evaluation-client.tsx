@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardCheck, Save, Loader2, Search, AlertCircle, CheckCircle2, Trash2, Pencil,
+  Users, ShieldCheck, HeartHandshake,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { logAudit } from '@/lib/data';
@@ -24,34 +25,119 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
-import { ROLE_PERMISSIONS } from '@/lib/types';
+import { ROLE_PERMISSIONS, UserRole } from '@/lib/types';
 
-interface EvalForm {
+export function EvaluationClient() {
+  const { profile, can } = useAuth();
+  const [tab, setTab] = useState<'hr' | 'safety'>('hr');
+
+  // Default tab based on role
+  useEffect(() => {
+    if (profile) {
+      if (profile.role === 'safety') setTab('safety');
+      else setTab('hr');
+    }
+  }, [profile]);
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Evaluation</h1>
+        <p className="text-sm text-muted-foreground">Enter monthly evaluation marks by category</p>
+      </div>
+
+      {profile && (
+        <Alert className="border-primary/20 bg-primary/5">
+          <ClipboardCheck className="h-4 w-4 text-primary" />
+          <AlertDescription className="text-sm">
+            <span className="font-medium">Your role: {profile.role === 'dept_head' ? 'Department Head' : profile.role.toUpperCase()}</span>
+            {' — '}
+            {profile.role === 'admin' && 'You can enter all score types (Department, HR, Safety).'}
+            {profile.role === 'hr' && 'You can enter HR marks only.'}
+            {profile.role === 'safety' && 'You can enter Safety marks only.'}
+            {profile.role === 'dept_head' && 'Department marks are entered from your department page.'}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <Tabs value={tab} onValueChange={(v) => setTab(v as 'hr' | 'safety')}>
+        <TabsList className="grid w-full max-w-md grid-cols-2">
+          <TabsTrigger value="hr" className="gap-2" disabled={profile ? !can('canEvaluateHR') && profile.role !== 'admin' : false}>
+            <HeartHandshake className="h-4 w-4" /> Human Resource
+          </TabsTrigger>
+          <TabsTrigger value="safety" className="gap-2" disabled={profile ? !can('canEvaluateSafety') && profile.role !== 'admin' : false}>
+            <ShieldCheck className="h-4 w-4" /> Safety
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="hr" className="mt-6">
+          <CategoryEvaluation
+            category="hr"
+            maxMarks={25}
+            canEvaluate={profile ? can('canEvaluateHR') : false}
+            profile={profile}
+            colorClass="text-chart-3"
+            accentColor="bg-chart-3"
+            icon={HeartHandshake}
+            title="Human Resource Evaluation"
+            description="Score employees on HR criteria (max 25 marks)"
+          />
+        </TabsContent>
+
+        <TabsContent value="safety" className="mt-6">
+          <CategoryEvaluation
+            category="safety"
+            maxMarks={30}
+            canEvaluate={profile ? can('canEvaluateSafety') : false}
+            profile={profile}
+            colorClass="text-accent"
+            accentColor="bg-accent"
+            icon={ShieldCheck}
+            title="Safety Evaluation"
+            description="Score employees on safety criteria (max 30 marks)"
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
+// ── Category-specific evaluation ────────────────────────────────────────────
+
+interface CategoryEvaluationProps {
+  category: 'hr' | 'safety';
+  maxMarks: number;
+  canEvaluate: boolean;
+  profile: any;
+  colorClass: string;
+  accentColor: string;
+  icon: React.ElementType;
+  title: string;
+  description: string;
+}
+
+interface CategoryForm {
   employeeId: string;
   month: number;
   year: number;
-  department_marks: string;
-  hr_marks: string;
-  safety_marks: string;
+  marks: string;
   negative_marks: string;
   remarks: string;
 }
 
-export function EvaluationClient() {
-  const { profile, can } = useAuth();
+function CategoryEvaluation({
+  category, maxMarks, canEvaluate, profile, colorClass, accentColor, icon: Icon, title, description,
+}: CategoryEvaluationProps) {
   const now = new Date();
-
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [negativeReasons, setNegativeReasons] = useState<NegativeReason[]>([]);
-  const [form, setForm] = useState<EvalForm>({
+  const [form, setForm] = useState<CategoryForm>({
     employeeId: '',
     month: now.getMonth() + 1,
     year: now.getFullYear(),
-    department_marks: '0',
-    hr_marks: '0',
-    safety_marks: '0',
+    marks: '0',
     negative_marks: '0',
     remarks: '',
   });
@@ -60,6 +146,7 @@ export function EvaluationClient() {
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [deptFilter, setDeptFilter] = useState<string>('all');
   const pageSize = 8;
 
   const loadData = useCallback(async () => {
@@ -91,18 +178,21 @@ export function EvaluationClient() {
     return existing.some((ev) => ev.employee_id === form.employeeId && ev.id !== editingId);
   }, [existing, form.employeeId, editingId]);
 
-  const computedTotal = useMemo(() => {
-    const d = parseFloat(form.department_marks) || 0;
-    const h = parseFloat(form.hr_marks) || 0;
-    const s = parseFloat(form.safety_marks) || 0;
-    const n = parseFloat(form.negative_marks) || 0;
-    return Math.max(0, d + h + s - n);
-  }, [form.department_marks, form.hr_marks, form.safety_marks, form.negative_marks]);
-
-  const filteredEmployees = employees.filter((e) => {
+  const filteredEmployees = useMemo(() => {
     const s = search.toLowerCase();
-    return !s || e.name.toLowerCase().includes(s) || e.employee_id.toLowerCase().includes(s);
-  });
+    return employees.filter((e) => {
+      const matchesSearch = !s || e.name.toLowerCase().includes(s) || e.employee_id.toLowerCase().includes(s);
+      const matchesDept = deptFilter === 'all' || e.department === deptFilter;
+      return matchesSearch && matchesDept;
+    });
+  }, [employees, search, deptFilter]);
+
+  const filteredExisting = useMemo(() => {
+    return existing.filter((ev: any) => {
+      if (deptFilter === 'all') return true;
+      return ev.employees?.department === deptFilter;
+    });
+  }, [existing, deptFilter]);
 
   const startEdit = (ev: Evaluation) => {
     setEditingId(ev.id);
@@ -110,9 +200,7 @@ export function EvaluationClient() {
       employeeId: ev.employee_id,
       month: ev.month,
       year: ev.year,
-      department_marks: String(ev.department_marks),
-      hr_marks: String(ev.hr_marks),
-      safety_marks: String(ev.safety_marks),
+      marks: String(category === 'hr' ? ev.hr_marks : ev.safety_marks),
       negative_marks: String(ev.negative_marks),
       remarks: ev.remarks ?? '',
     });
@@ -125,9 +213,7 @@ export function EvaluationClient() {
       employeeId: '',
       month: now.getMonth() + 1,
       year: now.getFullYear(),
-      department_marks: '0',
-      hr_marks: '0',
-      safety_marks: '0',
+      marks: '0',
       negative_marks: '0',
       remarks: '',
     });
@@ -143,38 +229,70 @@ export function EvaluationClient() {
     if (!form.employeeId) { toast({ title: 'Select an employee', variant: 'destructive' }); return; }
     if (isDuplicate) { toast({ title: 'Duplicate evaluation', description: 'This employee already has an evaluation for this month.', variant: 'destructive' }); return; }
 
-    const d = parseFloat(form.department_marks) || 0;
-    const h = parseFloat(form.hr_marks) || 0;
-    const s = parseFloat(form.safety_marks) || 0;
-    const n = parseFloat(form.negative_marks) || 0;
+    const marksVal = parseFloat(form.marks) || 0;
+    const negVal = parseFloat(form.negative_marks) || 0;
 
-    if (d > 45 || h > 25 || s > 30) {
-      toast({ title: 'Marks exceed maximum', description: 'Dept max 45, HR max 25, Safety max 30', variant: 'destructive' });
+    if (marksVal > maxMarks) {
+      toast({ title: 'Marks exceed maximum', description: `${category === 'hr' ? 'HR' : 'Safety'} max is ${maxMarks}`, variant: 'destructive' });
       return;
     }
 
     setSaving(true);
     try {
-      const payload = {
-        employee_id: form.employeeId,
-        month: form.month,
-        year: form.year,
-        department_marks: d,
-        hr_marks: h,
-        safety_marks: s,
-        negative_marks: n,
-        remarks: form.remarks.trim() || null,
-      };
       if (editingId) {
-        const { error } = await supabase.from('evaluations').update(payload).eq('id', editingId);
+        // Update only the category-specific column
+        const updatePayload: any = {
+          negative_marks: negVal,
+          remarks: form.remarks.trim() || null,
+        };
+        if (category === 'hr') updatePayload.hr_marks = marksVal;
+        else updatePayload.safety_marks = marksVal;
+
+        const { error } = await supabase.from('evaluations').update(updatePayload).eq('id', editingId);
         if (error) throw error;
-        await logAudit('UPDATE', 'evaluation', editingId, `Updated evaluation for ${selectedEmployee?.name}`, profile?.email);
+        await logAudit('UPDATE', 'evaluation', editingId, `Updated ${category.toUpperCase()} evaluation for ${selectedEmployee?.name}`, profile?.email);
         toast({ title: 'Evaluation updated' });
       } else {
-        const { error } = await supabase.from('evaluations').insert({ ...payload, created_by: profile?.id });
-        if (error) throw error;
-        await logAudit('CREATE', 'evaluation', null, `Created evaluation for ${selectedEmployee?.name} (${form.month}/${form.year})`, profile?.email);
-        toast({ title: 'Evaluation saved' });
+        // Check if a row exists for this employee/month/year (created by another role)
+        const { data: existingRow } = await supabase
+          .from('evaluations')
+          .select('id, department_marks, hr_marks, safety_marks')
+          .eq('employee_id', form.employeeId)
+          .eq('month', form.month)
+          .eq('year', form.year)
+          .maybeSingle();
+
+        if (existingRow) {
+          // Update the existing row's category marks
+          const updatePayload: any = {
+            negative_marks: negVal,
+            remarks: form.remarks.trim() || null,
+          };
+          if (category === 'hr') updatePayload.hr_marks = marksVal;
+          else updatePayload.safety_marks = marksVal;
+
+          const { error } = await supabase.from('evaluations').update(updatePayload).eq('id', existingRow.id);
+          if (error) throw error;
+          await logAudit('UPDATE', 'evaluation', existingRow.id, `Updated ${category.toUpperCase()} marks for ${selectedEmployee?.name}`, profile?.email);
+          toast({ title: 'Evaluation updated' });
+        } else {
+          // Create new row with this category's marks
+          const insertPayload: any = {
+            employee_id: form.employeeId,
+            month: form.month,
+            year: form.year,
+            department_marks: 0,
+            hr_marks: category === 'hr' ? marksVal : 0,
+            safety_marks: category === 'safety' ? marksVal : 0,
+            negative_marks: negVal,
+            remarks: form.remarks.trim() || null,
+            created_by: profile?.id,
+          };
+          const { error } = await supabase.from('evaluations').insert(insertPayload);
+          if (error) throw error;
+          await logAudit('CREATE', 'evaluation', null, `Created ${category.toUpperCase()} evaluation for ${selectedEmployee?.name} (${form.month}/${form.year})`, profile?.email);
+          toast({ title: 'Evaluation saved' });
+        }
       }
       resetForm();
       loadExisting();
@@ -193,215 +311,221 @@ export function EvaluationClient() {
     loadExisting();
   };
 
-  const perms = profile ? ROLE_PERMISSIONS[profile.role] : null;
+  const perms = profile ? ROLE_PERMISSIONS[profile.role as UserRole] : null;
   const canDelete = perms?.canDeleteEvaluations;
 
-  const existingPaged = existing.slice(page * pageSize, (page + 1) * pageSize);
-  const pageCount = Math.ceil(existing.length / pageSize) || 1;
+  const existingPaged = filteredExisting.slice(page * pageSize, (page + 1) * pageSize);
+  const pageCount = Math.ceil(filteredExisting.length / pageSize) || 1;
+
+  const marksVal = parseFloat(form.marks) || 0;
+  const negVal = parseFloat(form.negative_marks) || 0;
+
+  if (!canEvaluate && profile?.role !== 'admin') {
+    return (
+      <Card>
+        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+          <Icon className="mb-3 h-10 w-10 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">You don&apos;t have permission to enter {category === 'hr' ? 'HR' : 'Safety'} marks.</p>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Monthly Evaluation</h1>
-        <p className="text-sm text-muted-foreground">Score employees for {MONTH_NAMES[form.month - 1]} {form.year}</p>
-      </div>
-
-      {/* Role permissions banner */}
-      {profile && (
-        <Alert className="border-primary/20 bg-primary/5">
-          <ClipboardCheck className="h-4 w-4 text-primary" />
-          <AlertDescription className="text-sm">
-            <span className="font-medium">Your role: {profile.role === 'dept_head' ? 'Department Head' : profile.role.toUpperCase()}</span>
-            {' — '}
-            {profile.role === 'admin' && 'You can enter all score types (Department, HR, Safety).'}
-            {profile.role === 'hr' && 'You can enter HR marks only.'}
-            {profile.role === 'safety' && 'You can enter Safety marks only.'}
-            {profile.role === 'dept_head' && 'You can enter Department marks only.'}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
-        {/* Form */}
-        <Card className="lg:col-span-3">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <ClipboardCheck className="h-5 w-5 text-primary" />
-              {editingId ? 'Edit Evaluation' : 'New Evaluation'}
-            </CardTitle>
-            <CardDescription>Enter marks and any negative deductions</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSave} className="space-y-4">
-              {/* Period selectors */}
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Month</Label>
-                  <Select value={String(form.month)} onValueChange={(v) => setForm((f) => ({ ...f, month: Number(v) }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {MONTH_NAMES.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Year</Label>
-                  <Select value={String(form.year)} onValueChange={(v) => setForm((f) => ({ ...f, year: Number(v) }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {Array.from({ length: 5 }, (_, i) => now.getFullYear() - i).map((y) => (
-                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Employee picker */}
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
+      {/* Form */}
+      <Card className="lg:col-span-3">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-lg">
+            <Icon className={`h-5 w-5 ${colorClass}`} />
+            {editingId ? `Edit ${category === 'hr' ? 'HR' : 'Safety'} Evaluation` : `New ${category === 'hr' ? 'HR' : 'Safety'} Evaluation`}
+          </CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSave} className="space-y-4">
+            {/* Period selectors */}
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Employee</Label>
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input placeholder="Search employees..." className="mb-2 pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
-                </div>
-                <Select value={form.employeeId} onValueChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}>
-                  <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
-                  <SelectContent className="max-h-60">
-                    {filteredEmployees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
-                        {emp.employee_id} — {emp.name} ({emp.department})
-                      </SelectItem>
+                <Label>Month</Label>
+                <Select value={String(form.month)} onValueChange={(v) => setForm((f) => ({ ...f, month: Number(v) }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {MONTH_NAMES.map((m, i) => <SelectItem key={i} value={String(i + 1)}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Year</Label>
+                <Select value={String(form.year)} onValueChange={(v) => setForm((f) => ({ ...f, year: Number(v) }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 5 }, (_, i) => now.getFullYear() - i).map((y) => (
+                      <SelectItem key={y} value={String(y)}>{y}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
-              {isDuplicate && (
-                <Alert className="border-destructive/30 bg-destructive/5">
-                  <AlertCircle className="h-4 w-4 text-destructive" />
-                  <AlertDescription className="text-destructive">
-                    This employee already has an evaluation for {MONTH_NAMES[form.month - 1]} {form.year}. Edit it from the list below instead.
-                  </AlertDescription>
-                </Alert>
-              )}
+            {/* Department filter */}
+            <div className="space-y-2">
+              <Label>Filter by Department</Label>
+              <Select value={deptFilter} onValueChange={setDeptFilter}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Departments</SelectItem>
+                  {DEPARTMENTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
 
-              {/* Score inputs */}
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                <ScoreInput
-                  label="Dept Marks" max={45} value={form.department_marks}
-                  onChange={(v) => setForm((f) => ({ ...f, department_marks: v }))}
-                  disabled={profile ? !can('canEvaluateDept') : false}
-                  color="text-primary"
-                />
-                <ScoreInput
-                  label="HR Marks" max={25} value={form.hr_marks}
-                  onChange={(v) => setForm((f) => ({ ...f, hr_marks: v }))}
-                  disabled={profile ? !can('canEvaluateHR') : false}
-                  color="text-chart-3"
-                />
-                <ScoreInput
-                  label="Safety Marks" max={30} value={form.safety_marks}
-                  onChange={(v) => setForm((f) => ({ ...f, safety_marks: v }))}
-                  disabled={profile ? !can('canEvaluateSafety') : false}
-                  color="text-accent"
-                />
-                <ScoreInput
-                  label="Negative" max={100} value={form.negative_marks}
-                  onChange={(v) => setForm((f) => ({ ...f, negative_marks: v }))}
-                  disabled={false}
-                  color="text-destructive"
-                  isNegative
-                />
+            {/* Employee picker */}
+            <div className="space-y-2">
+              <Label>Employee</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input placeholder="Search employees..." className="mb-2 pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
+              <Select value={form.employeeId} onValueChange={(v) => setForm((f) => ({ ...f, employeeId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select employee" /></SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {filteredEmployees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.employee_id} — {emp.name} ({emp.department})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-              {/* Quick negative reasons */}
-              {negativeReasons.length > 0 && (
-                <div className="space-y-2">
-                  <Label className="text-xs text-muted-foreground">Quick add negative deduction</Label>
-                  <div className="flex flex-wrap gap-2">
-                    {negativeReasons.map((r) => (
-                      <Button
-                        key={r.id}
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => addNegativeReason(r)}
-                        className="text-destructive hover:bg-destructive/5"
-                      >
-                        {r.reason} <span className="ml-1 font-bold">-{r.deduction_marks}</span>
-                      </Button>
-                    ))}
-                  </div>
+            {isDuplicate && (
+              <Alert className="border-destructive/30 bg-destructive/5">
+                <AlertCircle className="h-4 w-4 text-destructive" />
+                <AlertDescription className="text-destructive">
+                  This employee already has an evaluation for {MONTH_NAMES[form.month - 1]} {form.year}. Edit it from the list below instead.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {/* Marks input */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs flex items-center justify-between">
+                  <span>{category === 'hr' ? 'HR' : 'Safety'} Marks</span>
+                  <span className="text-muted-foreground">max {maxMarks}</span>
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={maxMarks}
+                  step="0.5"
+                  value={form.marks}
+                  onChange={(e) => setForm((f) => ({ ...f, marks: e.target.value }))}
+                />
+                <div className={`text-xs font-medium ${colorClass}`}>{form.marks || '0'}</div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div className={`h-full rounded-full ${accentColor} transition-all duration-500`} style={{ width: `${Math.min(100, (marksVal / maxMarks) * 100)}%` }} />
                 </div>
-              )}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs flex items-center justify-between">
+                  <span>Negative Marks</span>
+                  <span className="text-destructive">deduction</span>
+                </Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step="0.5"
+                  value={form.negative_marks}
+                  onChange={(e) => setForm((f) => ({ ...f, negative_marks: e.target.value }))}
+                />
+                <div className="text-xs font-medium text-destructive">-{form.negative_marks || '0'}</div>
+              </div>
+            </div>
 
-              {/* Remarks */}
+            {/* Quick negative reasons */}
+            {negativeReasons.length > 0 && (
               <div className="space-y-2">
-                <Label htmlFor="remarks">Remarks</Label>
-                <Textarea
-                  id="remarks"
-                  placeholder="Optional notes about this evaluation..."
-                  value={form.remarks}
-                  onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
-                  rows={2}
-                />
-              </div>
-
-              {/* Total preview */}
-              <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-4">
-                <div>
-                  <div className="text-sm text-muted-foreground">Calculated Total</div>
-                  <div className="text-2xl font-bold">{computedTotal} <span className="text-sm font-normal text-muted-foreground">/ 100</span></div>
-                </div>
-                <div className="h-2 w-32 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-gradient-primary transition-all duration-500" style={{ width: `${Math.min(100, computedTotal)}%` }} />
+                <Label className="text-xs text-muted-foreground">Quick add negative deduction</Label>
+                <div className="flex flex-wrap gap-2">
+                  {negativeReasons.map((r) => (
+                    <Button
+                      key={r.id}
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => addNegativeReason(r)}
+                      className="text-destructive hover:bg-destructive/5"
+                    >
+                      {r.reason} <span className="ml-1 font-bold">-{r.deduction_marks}</span>
+                    </Button>
+                  ))}
                 </div>
               </div>
+            )}
 
-              <div className="flex gap-2">
-                <Button type="submit" disabled={saving || isDuplicate} className="flex-1">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="mr-2 h-4 w-4" /> {editingId ? 'Update' : 'Save'} Evaluation</>}
-                </Button>
-                {editingId && <Button type="button" variant="outline" onClick={resetForm}>Cancel Edit</Button>}
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+            {/* Remarks */}
+            <div className="space-y-2">
+              <Label htmlFor="remarks">Remarks</Label>
+              <Textarea
+                id="remarks"
+                placeholder="Optional notes about this evaluation..."
+                value={form.remarks}
+                onChange={(e) => setForm((f) => ({ ...f, remarks: e.target.value }))}
+                rows={2}
+              />
+            </div>
 
-        {/* Existing evaluations list */}
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="text-lg">Existing Evaluations</CardTitle>
-            <CardDescription>{MONTH_NAMES[form.month - 1]} {form.year} — {existing.length} total</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {existing.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <CheckCircle2 className="mb-2 h-8 w-8 text-muted-foreground/40" />
-                <p className="text-sm text-muted-foreground">No evaluations for this month yet</p>
-              </div>
-            ) : (
+            <div className="flex gap-2">
+              <Button type="submit" disabled={saving || isDuplicate} className="flex-1">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Save className="mr-2 h-4 w-4" /> {editingId ? 'Update' : 'Save'} Evaluation</>}
+              </Button>
+              {editingId && <Button type="button" variant="outline" onClick={resetForm}>Cancel Edit</Button>}
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
+      {/* Existing evaluations list */}
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle className="text-lg">Existing Evaluations</CardTitle>
+          <CardDescription>{MONTH_NAMES[form.month - 1]} {form.year} — {filteredExisting.length} total</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {filteredExisting.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <CheckCircle2 className="mb-2 h-8 w-8 text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">No evaluations for this month yet</p>
+            </div>
+          ) : (
             <>
               <div className="space-y-2">
-                {existingPaged.map((ev: any) => (
-                  <div key={ev.id} className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/30">
-                    <div className="flex-1 min-w-0">
-                      <div className="truncate font-medium text-sm">{ev.employees?.name ?? 'Unknown'}</div>
-                      <div className="text-xs text-muted-foreground">{ev.employees?.employee_id} · {ev.employees?.department}</div>
-                    </div>
-                    <Badge variant="secondary" className="font-bold">{Number(ev.total_marks)}</Badge>
-                    <div className="flex gap-1">
-                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(ev)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      {canDelete && (
-                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(ev)}>
-                          <Trash2 className="h-3.5 w-3.5" />
+                {existingPaged.map((ev: any) => {
+                  const categoryMarks = category === 'hr' ? Number(ev.hr_marks) : Number(ev.safety_marks);
+                  return (
+                    <div key={ev.id} className="flex items-center gap-3 rounded-lg border p-3 hover:bg-muted/30">
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate font-medium text-sm">{ev.employees?.name ?? 'Unknown'}</div>
+                        <div className="text-xs text-muted-foreground">{ev.employees?.employee_id} · {ev.employees?.department}</div>
+                      </div>
+                      <Badge variant="secondary" className={`font-bold ${colorClass}`}>
+                        {categoryMarks}
+                      </Badge>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(ev)}>
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                      )}
+                        {canDelete && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDelete(ev)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               {pageCount > 1 && (
                 <div className="flex items-center justify-between pt-3">
@@ -413,36 +537,9 @@ export function EvaluationClient() {
                 </div>
               )}
             </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function ScoreInput({ label, max, value, onChange, disabled, color, isNegative }: {
-  label: string; max: number; value: string; onChange: (v: string) => void; disabled: boolean; color: string; isNegative?: boolean;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs flex items-center justify-between">
-        <span>{label}</span>
-        <span className="text-muted-foreground">max {max}</span>
-      </Label>
-      <Input
-        type="number"
-        min={0}
-        max={max}
-        step="0.5"
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.value)}
-        className={disabled ? 'opacity-50' : ''}
-      />
-      <div className={`text-xs font-medium ${color}`}>
-        {isNegative ? '-' : ''}{value || '0'}
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

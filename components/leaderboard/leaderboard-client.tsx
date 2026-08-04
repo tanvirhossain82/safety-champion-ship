@@ -185,14 +185,14 @@ export function LeaderboardClient() {
                     <TableRow>
                       <TableHead className="cursor-pointer" onClick={() => toggleSort('rank')}><SortIcon column="rank" />Rank</TableHead>
                       <TableHead>Photo</TableHead>
-                      <TableHead className="cursor-pointer" onClick={() => toggleSort('employee_code')}><SortIcon column="employee_code" />Employee ID</TableHead>
-                      <TableHead className="cursor-pointer" onClick={() => toggleSort('name')}><SortIcon column="name" />Employee Name</TableHead>
+                      <TableHead className="cursor-pointer" onClick={() => toggleSort('employee_code')}><SortIcon column="employee_code" />Emp ID</TableHead>
+                      <TableHead className="cursor-pointer" onClick={() => toggleSort('name')}><SortIcon column="name" />Name</TableHead>
                       <TableHead className="cursor-pointer" onClick={() => toggleSort('department')}><SortIcon column="department" />Department</TableHead>
-                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('department_marks')}><SortIcon column="department_marks" />Department Marks</TableHead>
-                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('hr_marks')}><SortIcon column="hr_marks" />HR Marks</TableHead>
-                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('safety_marks')}><SortIcon column="safety_marks" />Safety Marks</TableHead>
-                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('negative_marks')}><SortIcon column="negative_marks" />Negative Marks</TableHead>
-                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('total_marks')}><SortIcon column="total_marks" />Total Marks</TableHead>
+                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('department_marks')}><SortIcon column="department_marks" />Dept</TableHead>
+                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('hr_marks')}><SortIcon column="hr_marks" />HR</TableHead>
+                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('safety_marks')}><SortIcon column="safety_marks" />Safety</TableHead>
+                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('negative_marks')}><SortIcon column="negative_marks" />Negative</TableHead>
+                      <TableHead className="cursor-pointer text-right" onClick={() => toggleSort('total_marks')}><SortIcon column="total_marks" />Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

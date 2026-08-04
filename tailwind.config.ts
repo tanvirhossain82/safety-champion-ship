@@ -12,7 +12,7 @@ const config: Config = {
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
         'gradient-conic': 'conic-gradient(from 180deg at 50% 50%, var(--tw-gradient-stops))',
-        'gradient-primary': 'linear-gradient(135deg, hsl(217 91% 60%), hsl(217 91% 45%))',
+        'gradient-primary': 'linear-gradient(135deg, hsl(115 89% 28%), hsl(115 89% 38%))',
         'gradient-accent': 'linear-gradient(135deg, hsl(28 100% 52%), hsl(20 90% 45%))',
       },
       borderRadius: {

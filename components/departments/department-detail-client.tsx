@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Users, ClipboardCheck, Loader2, Trophy, TrendingUp, Award,
-  Building2, Boxes, Warehouse, FlaskConical, Droplets, Wrench, Cpu,
-  Pencil, Trash2, Search,
+  Building2, Boxes, Warehouse, FlaskConical, Droplets, Wrench, Cpu, Search,
+  Plus, Save, CheckCircle2,
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { fetchRankedEvaluations, RankedRow, logAudit } from '@/lib/data';
@@ -18,18 +18,10 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Progress } from '@/components/ui/progress';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
-} from '@/components/ui/dialog';
-import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
-  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { format } from 'date-fns';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts';
@@ -38,28 +30,68 @@ const ICON_MAP: Record<string, React.ElementType> = {
   Building2, Boxes, Warehouse, FlaskConical, Droplets, Wrench, Cpu,
 };
 
-interface EmpForm {
-  employee_id: string;
-  name: string;
-  designation: string;
-  joining_date: string;
-  status: 'Active' | 'Inactive';
-  photo: string | null;
-}
+interface KpiCriterion { name: string; max: number; }
 
-const emptyEmpForm: EmpForm = {
-  employee_id: '',
-  name: '',
-  designation: '',
-  joining_date: format(new Date(), 'yyyy-MM-dd'),
-  status: 'Active',
-  photo: null,
+const DEPT_KPI_CONFIG: Record<string, KpiCriterion[]> = {
+  Emulsion: [
+    { name: 'Efficiency', max: 10 },
+    { name: 'Lead Time', max: 10 },
+    { name: 'Team Work', max: 5 },
+    { name: 'Attitude', max: 5 },
+    { name: 'Responsibility', max: 5 },
+    { name: 'Accuracy', max: 5 },
+    { name: 'Waste Mgmt', max: 5 },
+  ],
+  Maintenance: [
+    { name: 'Preventive Maintenance', max: 10 },
+    { name: 'Breakdown Response & Repair Efficiency', max: 10 },
+    { name: 'Teamwork', max: 5 },
+    { name: 'Attitude', max: 5 },
+    { name: 'Responsibility', max: 5 },
+    { name: 'Claning', max: 5 },
+    { name: 'Work Quality & Technical Skill', max: 5 },
+  ],
+  MRP: [
+    { name: 'Unloading Efficiency', max: 10 },
+    { name: 'Supply Lead', max: 10 },
+    { name: 'Teamwork', max: 5 },
+    { name: 'Attitude', max: 5 },
+    { name: 'Responsibility', max: 5 },
+    { name: 'Supply Accuracy', max: 5 },
+    { name: 'Material Waste', max: 5 },
+  ],
+  Solvent: [
+    { name: 'Efficiency', max: 10 },
+    { name: 'Lead Time', max: 10 },
+    { name: 'Teamwork', max: 5 },
+    { name: 'Attitude', max: 5 },
+    { name: 'Responsibility', max: 5 },
+    { name: 'Accuracy', max: 5 },
+    { name: 'Waste Mgmt', max: 5 },
+  ],
+  Technical: [
+    { name: 'Test Accuracy', max: 5 },
+    { name: 'R&D Lead Time', max: 10 },
+    { name: 'Teamwork', max: 5 },
+    { name: 'Attitude', max: 5 },
+    { name: 'Responsibility', max: 5 },
+    { name: 'Claning', max: 10 },
+    { name: 'Documentation', max: 5 },
+  ],
+  Warehouse: [
+    { name: 'Inventory Accuracy', max: 10 },
+    { name: 'Order Fulfillment', max: 10 },
+    { name: 'Teamwork', max: 5 },
+    { name: 'Attitude', max: 5 },
+    { name: 'Responsibility', max: 5 },
+    { name: 'Accuracy', max: 5 },
+    { name: 'Storage Management', max: 5 },
+  ],
 };
 
 export function DepartmentDetailClient({ code }: { code: string }) {
   const router = useRouter();
-  const { profile } = useAuth();
-  const isAdmin = profile?.role === 'admin';
+  const { profile, can } = useAuth();
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
@@ -67,19 +99,9 @@ export function DepartmentDetailClient({ code }: { code: string }) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [ranked, setRanked] = useState<RankedRow[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Employee add/edit state
   const [search, setSearch] = useState('');
-  const [empDialogOpen, setEmpDialogOpen] = useState(false);
-  const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
-  const [empForm, setEmpForm] = useState<EmpForm>(emptyEmpForm);
-  const [empSaving, setEmpSaving] = useState(false);
-  const [deleteEmp, setDeleteEmp] = useState<Employee | null>(null);
-
-  const loadEmployees = useCallback(async () => {
-    const { data } = await supabase.from('employees').select('*').eq('department', code as Department).order('name');
-    if (data) setEmployees(data as Employee[]);
-  }, [code]);
+  const [evalOpen, setEvalOpen] = useState(false);
+  const [kpiBreakdowns, setKpiBreakdowns] = useState<Record<string, any>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,67 +121,24 @@ export function DepartmentDetailClient({ code }: { code: string }) {
     }
   }, [code, month, year]);
 
+  const loadKpiBreakdowns = useCallback(async () => {
+    const empIds = employees.map((e) => e.id);
+    if (empIds.length === 0) return;
+    const { data } = await supabase
+      .from('dept_kpi_breakdowns')
+      .select('*')
+      .in('employee_id', empIds)
+      .eq('month', month)
+      .eq('year', year);
+    if (data) {
+      const map: Record<string, any> = {};
+      data.forEach((row) => { map[row.employee_id] = row; });
+      setKpiBreakdowns(map);
+    }
+  }, [employees, month, year]);
+
   useEffect(() => { load(); }, [load]);
-
-  const openEditEmp = (emp: Employee) => {
-    setEditingEmp(emp);
-    setEmpForm({
-      employee_id: emp.employee_id,
-      name: emp.name,
-      designation: emp.designation ?? '',
-      joining_date: emp.joining_date,
-      status: emp.status,
-      photo: emp.photo,
-    });
-    setEmpDialogOpen(true);
-  };
-
-  const handleEmpSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!empForm.employee_id.trim() || !empForm.name.trim()) {
-      toast({ title: 'Employee ID and Name are required', variant: 'destructive' });
-      return;
-    }
-    setEmpSaving(true);
-    try {
-      const payload = {
-        employee_id: empForm.employee_id.trim(),
-        name: empForm.name.trim(),
-        department: code as Department,
-        designation: empForm.designation.trim() || null,
-        joining_date: empForm.joining_date,
-        status: empForm.status,
-        photo: empForm.photo,
-      };
-      if (editingEmp) {
-        const { error } = await supabase.from('employees').update(payload).eq('id', editingEmp.id);
-        if (error) throw error;
-        await logAudit('UPDATE', 'employee', editingEmp.id, `Updated employee ${empForm.name} (${empForm.employee_id}) in ${code}`, profile?.email);
-        toast({ title: 'Employee updated' });
-      } else {
-        const { error } = await supabase.from('employees').insert(payload);
-        if (error) throw error;
-        await logAudit('CREATE', 'employee', null, `Added employee ${empForm.name} (${empForm.employee_id}) to ${code}`, profile?.email);
-        toast({ title: 'Employee added' });
-      }
-      setEmpDialogOpen(false);
-      loadEmployees();
-    } catch (e: any) {
-      toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
-    } finally {
-      setEmpSaving(false);
-    }
-  };
-
-  const handleEmpDelete = async () => {
-    if (!deleteEmp) return;
-    const { error } = await supabase.from('employees').delete().eq('id', deleteEmp.id);
-    if (error) { toast({ title: 'Delete failed', description: error.message, variant: 'destructive' }); return; }
-    await logAudit('DELETE', 'employee', deleteEmp.id, `Deleted employee ${deleteEmp.name} (${deleteEmp.employee_id}) from ${code}`, profile?.email);
-    toast({ title: 'Employee deleted' });
-    setDeleteEmp(null);
-    loadEmployees();
-  };
+  useEffect(() => { if (employees.length > 0) loadKpiBreakdowns(); }, [loadKpiBreakdowns]);
 
   const filteredEmployees = employees.filter((e) => {
     const s = search.toLowerCase();
@@ -187,6 +166,8 @@ export function DepartmentDetailClient({ code }: { code: string }) {
     ];
   }, [deptRanked]);
 
+  const canEvaluate = profile && (profile.role === 'admin' || (profile.role === 'dept_head' && profile.department === code));
+
   if (loading) {
     return (
       <div className="flex h-[60vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div>
@@ -210,14 +191,19 @@ export function DepartmentDetailClient({ code }: { code: string }) {
         <Link href="/departments">
           <Button variant="ghost" size="icon"><ArrowLeft className="h-5 w-5" /></Button>
         </Link>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-1 items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <Icon className="h-6 w-6" />
           </div>
-          <div>
+          <div className="flex-1">
             <h1 className="text-2xl font-bold tracking-tight">{department.name}</h1>
             <p className="text-sm text-muted-foreground">{department.description || 'Department sub-module'}</p>
           </div>
+          {canEvaluate && (
+            <Button onClick={() => setEvalOpen(true)} className="gap-2">
+              <Plus className="h-4 w-4" /> Department Evaluation
+            </Button>
+          )}
         </div>
       </div>
 
@@ -299,15 +285,12 @@ export function DepartmentDetailClient({ code }: { code: string }) {
               <CardTitle className="flex items-center gap-2 text-lg"><Users className="h-5 w-5 text-primary" /> Employees in {department.name}</CardTitle>
               <CardDescription>{activeEmployees.length} active, {employees.length - activeEmployees.length} inactive</CardDescription>
             </div>
-            {isAdmin && (
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/employees"><Users className="mr-2 h-4 w-4" /> Manage in Admin</Link>
-              </Button>
-            )}
+            <Link href="/admin">
+              <Button size="sm" variant="outline"><Users className="mr-2 h-4 w-4" /> Manage Employees</Button>
+            </Link>
           </div>
         </CardHeader>
         <CardContent>
-          {/* Search */}
           {employees.length > 0 && (
             <div className="relative mb-4 max-w-sm">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -318,11 +301,6 @@ export function DepartmentDetailClient({ code }: { code: string }) {
             <div className="flex h-32 flex-col items-center justify-center text-center">
               <Users className="mb-2 h-8 w-8 text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">{employees.length === 0 ? 'No employees in this department yet' : 'No employees match your search'}</p>
-              {isAdmin && employees.length === 0 && (
-                <Button size="sm" variant="outline" className="mt-3" asChild>
-                  <Link href="/employees"><Users className="mr-2 h-4 w-4" /> Add employees in Admin</Link>
-                </Button>
-              )}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -333,13 +311,14 @@ export function DepartmentDetailClient({ code }: { code: string }) {
                     <TableHead className="w-12">Photo</TableHead>
                     <TableHead>ID</TableHead>
                     <TableHead>Name</TableHead>
-                    <TableHead>Department</TableHead>
-                    {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">KPI (Dept)</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filteredEmployees.map((emp, idx) => {
                     const evalRow = deptRanked.find((r) => r.employee_id === emp.id);
+                    const kpi = kpiBreakdowns[emp.id];
                     return (
                       <TableRow key={emp.id} className="hover:bg-muted/50">
                         <TableCell className="text-muted-foreground font-medium">{idx + 1}</TableCell>
@@ -355,21 +334,20 @@ export function DepartmentDetailClient({ code }: { code: string }) {
                           <div className="text-xs text-muted-foreground">{emp.designation || '—'}</div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="secondary" className="text-xs">{emp.department}</Badge>
-                            {evalRow ? (
-                              <Badge variant="outline" className="text-xs font-bold">{Number(evalRow.total_marks)} pts</Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-xs text-muted-foreground">Not evaluated</Badge>
-                            )}
-                          </div>
+                          <Badge variant={emp.status === 'Active' ? 'secondary' : 'outline'} className="text-xs">{emp.status}</Badge>
                         </TableCell>
-                        {isAdmin && (
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditEmp(emp)}><Pencil className="h-4 w-4" /></Button>
-                            <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setDeleteEmp(emp)}><Trash2 className="h-4 w-4" /></Button>
-                          </TableCell>
-                        )}
+                        <TableCell className="text-right">
+                          {kpi ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <span className="text-sm font-bold text-primary">{Number(kpi.total)} / 45</span>
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            </div>
+                          ) : evalRow ? (
+                            <span className="text-sm font-bold">{Number(evalRow.department_marks)} / 45</span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Not evaluated</span>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
@@ -379,74 +357,6 @@ export function DepartmentDetailClient({ code }: { code: string }) {
           )}
         </CardContent>
       </Card>
-
-      {/* Employee add/edit dialog */}
-      <Dialog open={empDialogOpen} onOpenChange={setEmpDialogOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{editingEmp ? 'Edit Employee' : 'Add Employee to ' + department.name}</DialogTitle>
-            <DialogDescription>{editingEmp ? 'Update employee information' : 'Create a new employee in this department'}</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleEmpSave} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="emp_id">Employee ID *</Label>
-                <Input id="emp_id" value={empForm.employee_id} onChange={(e) => setEmpForm((f) => ({ ...f, employee_id: e.target.value }))} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="emp_name">Full Name *</Label>
-                <Input id="emp_name" value={empForm.name} onChange={(e) => setEmpForm((f) => ({ ...f, name: e.target.value }))} required />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="emp_designation">Designation</Label>
-                <Input id="emp_designation" value={empForm.designation} onChange={(e) => setEmpForm((f) => ({ ...f, designation: e.target.value }))} placeholder="e.g. Operator" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="emp_joining">Joining Date *</Label>
-                <Input id="emp_joining" type="date" value={empForm.joining_date} onChange={(e) => setEmpForm((f) => ({ ...f, joining_date: e.target.value }))} required />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Department</Label>
-                <Input value={department.name} disabled className="bg-muted/50" />
-              </div>
-              <div className="space-y-2">
-                <Label>Status</Label>
-                <Select value={empForm.status} onValueChange={(v: 'Active' | 'Inactive') => setEmpForm((f) => ({ ...f, status: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEmpDialogOpen(false)}>Cancel</Button>
-              <Button type="submit" disabled={empSaving}>{empSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingEmp ? 'Save Changes' : 'Add Employee'}</Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      {/* Employee delete confirmation */}
-      <AlertDialog open={!!deleteEmp} onOpenChange={(open) => !open && setDeleteEmp(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Employee?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will permanently delete {deleteEmp?.name} ({deleteEmp?.employee_id}) and all related evaluations. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleEmpDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* Department leaderboard */}
       {deptRanked.length > 0 && (
@@ -497,7 +407,248 @@ export function DepartmentDetailClient({ code }: { code: string }) {
           </CardContent>
         </Card>
       )}
+
+      {/* KPI Evaluation Dialog */}
+      {canEvaluate && (
+        <DeptEvalDialog
+          open={evalOpen}
+          onClose={() => setEvalOpen(false)}
+          employees={employees.filter((e) => e.status === 'Active')}
+          department={code}
+          month={month}
+          year={year}
+          kpiConfig={DEPT_KPI_CONFIG[code] ?? []}
+          profile={profile}
+          existingBreakdowns={kpiBreakdowns}
+          onSaved={() => { load(); loadKpiBreakdowns(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── KPI Evaluation Dialog ───────────────────────────────────────────────────
+
+interface DeptEvalDialogProps {
+  open: boolean;
+  onClose: () => void;
+  employees: Employee[];
+  department: string;
+  month: number;
+  year: number;
+  kpiConfig: KpiCriterion[];
+  profile: any;
+  existingBreakdowns: Record<string, any>;
+  onSaved: () => void;
+}
+
+function DeptEvalDialog({
+  open, onClose, employees, department, month, year, kpiConfig, profile, existingBreakdowns, onSaved,
+}: DeptEvalDialogProps) {
+  const [selectedEmpId, setSelectedEmpId] = useState('');
+  const [scores, setScores] = useState<number[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [empSearch, setEmpSearch] = useState('');
+
+  const filteredEmps = employees.filter((e) => {
+    const s = empSearch.toLowerCase();
+    return !s || e.name.toLowerCase().includes(s) || e.employee_id.toLowerCase().includes(s);
+  });
+
+  // When an employee is selected, pre-fill from existing breakdown if available
+  useEffect(() => {
+    if (!selectedEmpId || kpiConfig.length === 0) {
+      setScores(kpiConfig.map(() => 0));
+      return;
+    }
+    const existing = existingBreakdowns[selectedEmpId];
+    if (existing?.criteria) {
+      const mapped = kpiConfig.map((c, i) => {
+        const found = existing.criteria.find((x: any) => x.name === c.name);
+        return found ? Number(found.score) : 0;
+      });
+      setScores(mapped);
+    } else {
+      setScores(kpiConfig.map(() => 0));
+    }
+  }, [selectedEmpId, kpiConfig, existingBreakdowns]);
+
+  const total = scores.reduce((s, v) => s + v, 0);
+  const maxTotal = kpiConfig.reduce((s, c) => s + c.max, 0);
+
+  const handleScore = (idx: number, val: string) => {
+    const num = Math.min(kpiConfig[idx].max, Math.max(0, parseFloat(val) || 0));
+    setScores((prev) => { const next = [...prev]; next[idx] = num; return next; });
+  };
+
+  const handleSave = async () => {
+    if (!selectedEmpId) { toast({ title: 'Select an employee', variant: 'destructive' }); return; }
+
+    setSaving(true);
+    try {
+      const criteria = kpiConfig.map((c, i) => ({ name: c.name, max: c.max, score: scores[i] ?? 0 }));
+
+      // Upsert KPI breakdown
+      const { error: kpiError } = await supabase
+        .from('dept_kpi_breakdowns')
+        .upsert({
+          employee_id: selectedEmpId,
+          month,
+          year,
+          department,
+          criteria,
+          total,
+          created_by: profile?.id ?? null,
+        }, { onConflict: 'employee_id,month,year' });
+
+      if (kpiError) throw kpiError;
+
+      // Sync department_marks into evaluations table
+      const { data: existingEval } = await supabase
+        .from('evaluations')
+        .select('id')
+        .eq('employee_id', selectedEmpId)
+        .eq('month', month)
+        .eq('year', year)
+        .maybeSingle();
+
+      if (existingEval) {
+        await supabase
+          .from('evaluations')
+          .update({ department_marks: total })
+          .eq('id', existingEval.id);
+      } else {
+        await supabase.from('evaluations').insert({
+          employee_id: selectedEmpId,
+          month,
+          year,
+          department_marks: total,
+          hr_marks: 0,
+          safety_marks: 0,
+          negative_marks: 0,
+          created_by: profile?.id ?? null,
+        });
+      }
+
+      const emp = employees.find((e) => e.id === selectedEmpId);
+      await logAudit('CREATE', 'dept_kpi_breakdown', selectedEmpId, `KPI breakdown saved for ${emp?.name} (${month}/${year}) — ${total}/${maxTotal}`, profile?.email);
+
+      toast({ title: 'KPI evaluation saved', description: `${emp?.name}: ${total} / ${maxTotal} marks` });
+      onSaved();
+      onClose();
+    } catch (e: any) {
+      toast({ title: 'Save failed', description: e.message, variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ClipboardCheck className="h-5 w-5 text-primary" />
+            Department KPI Evaluation
+          </DialogTitle>
+          <DialogDescription>
+            {MONTH_NAMES[month - 1]} {year} — {department} Department (Max: {maxTotal} marks)
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 py-2">
+          {/* Employee selector */}
+          <div className="space-y-2">
+            <Label>Select Employee</Label>
+            <Input
+              placeholder="Search by name or ID..."
+              value={empSearch}
+              onChange={(e) => setEmpSearch(e.target.value)}
+              className="mb-1"
+            />
+            <Select value={selectedEmpId} onValueChange={setSelectedEmpId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Choose employee..." />
+              </SelectTrigger>
+              <SelectContent className="max-h-52">
+                {filteredEmps.map((emp) => (
+                  <SelectItem key={emp.id} value={emp.id}>
+                    {emp.employee_id} — {emp.name}
+                    {existingBreakdowns[emp.id] ? ' ✓' : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* KPI criteria inputs */}
+          {kpiConfig.length > 0 && (
+            <div className="space-y-3">
+              <Label className="text-sm font-semibold">KPI Criteria</Label>
+              <div className="rounded-lg border divide-y">
+                {kpiConfig.map((criterion, idx) => (
+                  <div key={criterion.name} className="flex items-center gap-3 px-4 py-3">
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">{criterion.name}</div>
+                      <div className="text-xs text-muted-foreground">Max: {criterion.max}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={criterion.max}
+                        step={0.5}
+                        value={scores[idx] ?? 0}
+                        onChange={(e) => handleScore(idx, e.target.value)}
+                        className="w-20 text-center font-semibold"
+                        disabled={!selectedEmpId}
+                      />
+                      <span className="text-xs text-muted-foreground w-12">/ {criterion.max}</span>
+                      <div className="w-20 h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${criterion.max > 0 ? ((scores[idx] ?? 0) / criterion.max) * 100 : 0}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Total bar */}
+          <div className="rounded-lg border bg-muted/30 p-4 flex items-center justify-between gap-4">
+            <div>
+              <div className="text-xs text-muted-foreground mb-1">KPI Total</div>
+              <div className="text-3xl font-bold">
+                {total}
+                <span className="text-base font-normal text-muted-foreground"> / {maxTotal}</span>
+              </div>
+            </div>
+            <div className="flex-1 max-w-xs">
+              <div className="h-3 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-primary to-primary/70 transition-all duration-500"
+                  style={{ width: `${maxTotal > 0 ? (total / maxTotal) * 100 : 0}%` }}
+                />
+              </div>
+              <div className="text-xs text-muted-foreground mt-1 text-right">
+                {maxTotal > 0 ? Math.round((total / maxTotal) * 100) : 0}%
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving || !selectedEmpId}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Evaluation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
